@@ -7,83 +7,118 @@ from loguru import logger
 from .gemini_client import GeminiClient
 from .video_executor import VideoExecutor
 
-load_dotenv('.env')  # Ищем .env в текущей директории
+load_dotenv('.env')  # Load .env from the current directory
 
-# Настройка логирования
+# Logging setup
 logger.remove()
 logger.add(sys.stderr, level="INFO", format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
 
 
 @click.command()
 @click.argument('request', required=True)
-@click.option('--output-dir', '-o', default='output', help='Папка для сохранения видео')
-@click.option('--api-key', help='API ключ Gemini (или используйте переменную окружения GEMINI_API_KEY)')
-@click.option('--scene-name', default='VideoScene', help='Имя класса сцены в сгенерированном коде')
-@click.option('--show-code', is_flag=True, help='Показать сгенерированный код перед выполнением')
+@click.option('--output-dir', '-o', default='output', help='Directory to save the video')
+@click.option('--api-key', help='Gemini API key (or use the GEMINI_API_KEY environment variable)')
+@click.option('--scene-name', default='VideoScene', help='Scene class name in the generated code')
+@click.option('--show-code', is_flag=True, help='Show generated code before execution')
 def generate(request: str, output_dir: str, api_key: str, scene_name: str, show_code: bool):
     """
-    Генерирует видео на основе текстового запроса используя Gemini и Manim.
-    
-    REQUEST - описание того, какое видео нужно создать
-    
-    Примеры:
-    
-        manim-generate "Создай анимацию теоремы Пифагора"
-        
-        manim-generate "Покажи как работает интеграл функции x^2"
-        
-        manim-generate "Анимация сортировки пузырьком"
+    Generate a video from a text prompt using Gemini and Manim.
+
+    REQUEST is a description of the video to create.
+
+    Examples:
+
+        manim-generate "Create an animation of the Pythagorean theorem"
+
+        manim-generate "Show how the integral of x^2 works"
+
+        manim-generate "Bubble sort animation"
     """
     
-    logger.info("🎬 Запуск Manim Video Generator")
-    logger.info(f"📝 Запрос: {request}")
+    logger.info("🎬 Starting Manim Video Generator")
+    logger.info(f"📝 Request: {request}")
     
     try:
-        # Инициализация клиента Gemini
-        logger.info("🤖 Инициализация Gemini...")
+        # Initialize Gemini client
+        logger.info("🤖 Initializing Gemini...")
         gemini = GeminiClient(api_key=api_key)
         
-        # Генерация кода
-        logger.info("⚡ Генерация кода Manim...")
+        # Generate code
+        logger.info("⚡ Generating Manim code...")
         code = gemini.generate_manim_code(request)
         
         if show_code:
-            click.echo("📄 Сгенерированный код:")
+            click.echo("📄 Generated code:")
             click.echo("=" * 50)
             click.echo(code)
             click.echo("=" * 50)
             
-            if not click.confirm("Продолжить выполнение?"):
-                logger.info("Отменено пользователем")
+            if not click.confirm("Proceed with execution?"):
+                logger.info("Cancelled by user")
                 return
         
-        # Выполнение кода
-        logger.info("🎥 Рендеринг видео...")
+        # Execute code with optional error fixing
         executor = VideoExecutor(output_dir=output_dir)
-        video_path = executor.execute_manim_code(code, scene_name=scene_name)
+
+        while True:
+            logger.info("🎥 Rendering video...")
+            try:
+                video_path = executor.execute_manim_code(code, scene_name=scene_name)
+                break
+            except Exception as exec_err:
+                import traceback
+                trace = traceback.format_exc()
+                click.echo("\n❌ Rendering error:\n" + trace, err=True)
+
+                choice = click.prompt(
+                    "What to do? [s]top / [r]etry LLM / [h]int",
+                    type=click.Choice(["s", "r", "h"], case_sensitive=False),
+                    default="s"
+                )
+
+                if choice.lower() == "s":
+                    sys.exit(1)
+
+                hint = None
+                if choice.lower() == "h":
+                    hint = click.prompt("Enter a hint for the LLM")
+
+                logger.info("🔧 Requesting code fix from Gemini")
+                code = gemini.fix_manim_code(code, trace, hint)
+
+                if show_code:
+                    click.echo("\n📄 Corrected code:")
+                    click.echo("=" * 50)
+                    click.echo(code)
+                    click.echo("=" * 50)
+
+                        if not click.confirm("Continue execution with the new code?"):
+                            logger.info("Cancelled by user")
+                            sys.exit(1)
+
         
-        # Успех!
-        logger.info(f"✅ Видео успешно создано: {video_path}")
-        click.echo(f"\n🎉 Готово! Видео сохранено в: {video_path}")
+        # Success!
+        logger.info(f"✅ Video successfully created: {video_path}")
+        click.echo(f"\n🎉 Done! Video saved to: {video_path}")
         
-        # Проверяем размер файла
+        # Show file size
         size_mb = video_path.stat().st_size / (1024 * 1024)
-        click.echo(f"📊 Размер файла: {size_mb:.1f} MB")
+        click.echo(f"📊 File size: {size_mb:.1f} MB")
         
     except ValueError as e:
-        logger.error(f"Ошибка конфигурации: {e}")
-        click.echo(f"❌ Ошибка конфигурации: {e}", err=True)
+        logger.error(f"Configuration error: {e}")
+        click.echo(f"❌ Configuration error: {e}", err=True)
         sys.exit(1)
         
     except Exception as e:
-        logger.error(f"Неожиданная ошибка: {e}")
-        click.echo(f"❌ Ошибка: {e}", err=True)
+        logger.error(f"Unexpected error: {e}")
+        click.echo(f"❌ Error: {e}", err=True)
         sys.exit(1)
 
 
 @click.group()
 def cli():
-    """Manim Video Generator - создание видео с помощью ИИ"""
+    """Manim Video Generator - create videos using AI"""
     pass
 
 
