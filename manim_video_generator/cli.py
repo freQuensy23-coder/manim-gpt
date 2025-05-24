@@ -92,9 +92,9 @@ def generate(request: str, output_dir: str, api_key: str, scene_name: str, show_
                     click.echo(code)
                     click.echo("=" * 50)
 
-                        if not click.confirm("Continue execution with the new code?"):
-                            logger.info("Cancelled by user")
-                            sys.exit(1)
+                    if not click.confirm("Continue execution with the new code?"):
+                        logger.info("Cancelled by user")
+                        sys.exit(1)
 
         
         # Success!
