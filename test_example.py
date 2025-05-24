@@ -1,93 +1,93 @@
 """
-Простой тест для проверки работы модулей
-Запустите: python test_example.py
+Simple tests to check that modules load correctly.
+Run: python test_example.py
 """
 
 import os
 from pathlib import Path
 
-# Добавляем текущую директорию в путь
+# Add the current directory to the path
 import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 def test_imports():
-    """Тестируем, что все модули импортируются корректно"""
-    print("🧪 Тестирование импортов...")
+    """Test that all modules import correctly"""
+    print("🧪 Testing imports...")
     
     try:
         from manim_video_generator.gemini_client import GeminiClient
-        print("✅ GeminiClient импортирован")
+        print("✅ GeminiClient imported")
     except ImportError as e:
-        print(f"❌ Ошибка импорта GeminiClient: {e}")
+        print(f"❌ GeminiClient import error: {e}")
         return False
     
     try:
         from manim_video_generator.video_executor import VideoExecutor
-        print("✅ VideoExecutor импортирован")
+        print("✅ VideoExecutor imported")
     except ImportError as e:
-        print(f"❌ Ошибка импорта VideoExecutor: {e}")
+        print(f"❌ VideoExecutor import error: {e}")
         return False
     
     try:
         from manim_video_generator.cli import generate
-        print("✅ CLI импортирован")
+        print("✅ CLI imported")
     except ImportError as e:
-        print(f"❌ Ошибка импорта CLI: {e}")
+        print(f"❌ CLI import error: {e}")
         return False
     
     return True
 
 def test_video_executor():
-    """Тестируем VideoExecutor без реального выполнения"""
-    print("\n🧪 Тестирование VideoExecutor...")
+    """Test VideoExecutor without actual execution"""
+    print("\n🧪 Testing VideoExecutor...")
     
     try:
         from manim_video_generator.video_executor import VideoExecutor
         
-        # Создаем экземпляр
+        # Create an instance
         executor = VideoExecutor(output_dir="test_output")
-        print("✅ VideoExecutor создан успешно")
+        print("✅ VideoExecutor created successfully")
         
-        # Проверяем, что папка создалась
+        # Check that the folder was created
         if Path("test_output").exists():
-            print("✅ Папка вывода создана")
+            print("✅ Output folder created")
         else:
-            print("❌ Папка вывода не создана")
+            print("❌ Output folder not created")
             return False
             
     except Exception as e:
-        print(f"❌ Ошибка в VideoExecutor: {e}")
+        print(f"❌ VideoExecutor error: {e}")
         return False
     
     return True
 
 def test_gemini_client_init():
-    """Тестируем инициализацию GeminiClient (без API ключа)"""
-    print("\n🧪 Тестирование GeminiClient (без API)...")
+    """Test GeminiClient initialization (without API key)"""
+    print("\n🧪 Testing GeminiClient (without API)...")
     
     try:
         from manim_video_generator.gemini_client import GeminiClient
         
-        # Тестируем ошибку без API ключа
+        # Expect an error without API key
         try:
             client = GeminiClient()
-            print("❌ GeminiClient не должен инициализироваться без API ключа")
+            print("❌ GeminiClient should not initialize without API key")
             return False
         except ValueError as e:
             if "GEMINI_API_KEY" in str(e):
-                print("✅ Корректная проверка API ключа")
+                print("✅ Correct API key check")
             else:
-                print(f"❌ Неожиданная ошибка: {e}")
+                print(f"❌ Unexpected error: {e}")
                 return False
                 
     except Exception as e:
-        print(f"❌ Ошибка в GeminiClient: {e}")
+        print(f"❌ GeminiClient error: {e}")
         return False
     
     return True
 
 def main():
-    print("🚀 Запуск тестов Manim Video Generator\n")
+    print("🚀 Running Manim Video Generator tests\n")
     
     all_passed = True
     
@@ -95,14 +95,14 @@ def main():
     all_passed &= test_video_executor()
     all_passed &= test_gemini_client_init()
     
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     if all_passed:
-        print("🎉 Все тесты прошли успешно!")
-        print("\nДля полного тестирования:")
-        print("1. Установите API ключ Gemini в .env файл")
-        print("2. Запустите: manim-generate 'простая анимация'")
+        print("🎉 All tests passed!")
+        print("\nFor full testing:")
+        print("1. Put your Gemini API key in the .env file")
+        print("2. Run: manim-generate 'simple animation'")
     else:
-        print("❌ Некоторые тесты не прошли")
+        print("❌ Some tests failed")
         sys.exit(1)
 
 if __name__ == "__main__":
