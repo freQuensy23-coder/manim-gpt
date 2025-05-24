@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  manim-video-generator:
+    build: .
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      - ./output:/app/output
+    command: ["Создай анимацию движущегося круга"]  # Замените на ваш запрос
+
+# Использование:
+# 1. Создайте .env файл с GEMINI_API_KEY=your_key
+# 2. Запустите: docker-compose up --build 
