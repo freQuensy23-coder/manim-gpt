@@ -1,7 +1,7 @@
 # gradio_manim_gemini_app.py – **v3**
 """Gradio demo 
 ============
-— third revision —
+— third revision —
 • **Правильная структура history** — теперь `Chatbot` получает список *пар*
   `(user_text, bot_text)`.  Чанки бота апдей‑тят второй элемент последней пары,
   поэтому «дубли» и «робот‑юзер» исчезают.  
@@ -29,6 +29,7 @@ from typing import List, Tuple
 
 import gradio as gr
 from google import genai
+from google.genai.chats import Chat
 from google.genai.types import GenerateContentConfig, ThinkingConfig, UploadFileConfig
 
 from manim_video_generator.video_executor import VideoExecutor  # type: ignore
@@ -57,7 +58,7 @@ def append_bot_chunk(history: List[Tuple[str, str]], chunk: str):
     history[-1] = (user, bot + chunk)
 
 
-def stream_parts(chat: genai.Chat, prompt):
+def stream_parts(chat: Chat, prompt):
     cfg = GenerateContentConfig(thinking_config=ThinkingConfig(include_thoughts=True))
     for chunk in chat.send_message_stream(prompt, config=cfg):
         if chunk.candidates:
@@ -78,7 +79,7 @@ def extract_python(md: str) -> str:
 
 class Session(dict):
     phase: str  # await_task | coding_loop | review_loop | finished
-    chat: genai.Chat | None
+    chat: Chat | None
     last_video: Path | None
 
     def __init__(self):
@@ -94,7 +95,7 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
 
     # 0. Always reflect user input
     add_user_msg(history, user_msg)
-    yield history, state
+    yield history, state, state.last_video
 
     # bootstrap chat on very first user request
     if state.phase == "await_task":
@@ -103,36 +104,34 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
         scenario_prompt = f"{SYSTEM_PROMPT_SCENARIO_GENERATOR}\n\n{user_msg}"
         for txt in stream_parts(state.chat, scenario_prompt):
             append_bot_chunk(history, txt)
-            yield history, state
+            yield history, state, state.last_video
             await asyncio.sleep(0)
 
-        append_bot_chunk(history, "\n\n*(type **continue** to proceed)*")
+        append_bot_chunk(history, "\n\n*(type **continue** to proceed to code generation)*")
         state.phase = "coding_loop"
-        yield history, state
+        yield history, state, state.last_video
         return
 
     # later phases require chat obj
     if not state.chat:
         append_bot_chunk(history, "⚠️ Internal error: lost chat session.")
-        yield history, state
+        yield history, state, state.last_video
         return
 
     # ── Coding loop ─────────────────────────────────────────────────────────────
     if state.phase == "coding_loop":
         if user_msg.strip().lower() not in {"c", "continue", "с"}:
             append_bot_chunk(history, "⚠️ Type **continue** to move on.")
-            yield history, state
+            yield history, state, state.last_video
             return
-
+        prompt = (
+            "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
+        )
         while True:  # keep cycling until render succeeds
             # 1. Ask for code
-            code_prompt = (
-                "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
-            )
-            add_user_msg(history, "# system → generate code")
-            for chunk in stream_parts(state.chat, code_prompt):
+            for chunk in stream_parts(state.chat, prompt):
                 append_bot_chunk(history, chunk)
-                yield history, state
+                yield history, state, state.last_video
                 await asyncio.sleep(0)
 
             full_answer = history[-1][1]
@@ -141,8 +140,9 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
             except ValueError as e:
                 # send formatting error to model, loop again
                 err_msg = f"Error: {e}. Please wrap the code in ```python``` fence."
+                prompt = err_msg
                 add_user_msg(history, err_msg)
-                yield history, state
+                yield history, state, state.last_video
                 continue  # restart loop
 
             # 2. Render
@@ -151,28 +151,30 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
                 state.last_video = video_path
             except Exception as e:
                 tb = traceback.format_exc(limit=10)
-                err_msg = f"Error, your code is not valid: {e}. Traceback: {tb}"
+                err_msg = f"Error, your code is not valid: {e}. Traceback: {tb}. Please fix this error and regenerate the code again."
+                prompt = err_msg
                 add_user_msg(history, err_msg)  # error == user message
-                yield history, state
+                yield history, state, state.last_video
                 continue  # Gemini will answer with a fix
 
             append_bot_chunk(history, "\n🎞️ Rendering done, uploading for review…")
-            yield history, state
+            yield history, state, state.last_video
 
             # 3. Upload
             try:
                 file_ref = client.files.upload(
                     file=video_path, config=UploadFileConfig(display_name=video_path.name)
                 )
-                while file_ref.state.name == "PROCESSING":
+                while file_ref.state and file_ref.state.name == "PROCESSING":
                     await asyncio.sleep(3)
-                    file_ref = client.files.get(name=file_ref.name)
-                if file_ref.state.name == "FAILED":
+                    if file_ref.name:
+                        file_ref = client.files.get(name=file_ref.name)
+                if file_ref.state and file_ref.state.name == "FAILED":
                     raise RuntimeError("Gemini failed to process upload")
             except Exception as up_err:
                 err_msg = f"Upload error: {up_err}"
                 add_user_msg(history, err_msg)
-                yield history, state
+                yield history, state, state.last_video
                 continue  # ask Gemini to fix
 
             # 4. Review
@@ -180,13 +182,13 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
             add_user_msg(history, "# system → review video")
             for chunk in stream_parts(state.chat, review_prompt):
                 append_bot_chunk(history, chunk)
-                yield history, state
+                yield history, state, state.last_video
                 await asyncio.sleep(0)
 
             if "no issues found" in history[-1][1].lower():
                 append_bot_chunk(history, "\n✅ Video accepted! 🎉")
                 state.phase = "finished"
-                yield history, state
+                yield history, state, state.last_video
                 return
             else:
                 append_bot_chunk(history, "\n🔄 Issues found. Trying again…")
@@ -196,7 +198,7 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
     # ── Finished phase ──────────────────────────────────────────────────────────
     if state.phase == "finished":
         append_bot_chunk(history, "Session complete. Refresh page to start over.")
-        yield history, state
+        yield history, state, state.last_video
 
 # ───────────────────────────────  UI  ──────────────────────────────────────────
 
@@ -216,10 +218,8 @@ def build_app():
         def get_vid(state: Session):
             return state.last_video if state.last_video else None
 
-        btn.click(chat_handler, [txt, history, session], [history, session]) \
+        btn.click(chat_handler, [txt, history, session], [history, session, vid]) \
            .then(lambda: "", None, txt)
-
-        session.change(get_vid, session, vid)
 
     return demo
 
