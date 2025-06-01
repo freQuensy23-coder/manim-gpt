@@ -25,5 +25,4 @@ libopenjp2-7-dev
 libtiff5-dev
 gir1.2-glib-2.0
 libgirepository-1.0-1
-libgtk-3-dev
-libgobject-introspection-dev 
+libgtk-3-dev 
