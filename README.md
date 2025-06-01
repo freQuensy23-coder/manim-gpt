@@ -4,7 +4,7 @@ emoji: 🎬
 colorFrom: blue
 colorTo: purple
 sdk: gradio
-sdk_version: 5.32.0
+sdk_version: "4.0.0"
 app_file: demo.py
 pinned: false
 license: mit
@@ -43,4 +43,4 @@ Create beautiful explanatory animations from simple text prompts using AI and Ma
 Set your Gemini API key as an environment variable:
 ```bash
 export GEMINI_API_KEY="your_api_key_here"
-```
+``` 

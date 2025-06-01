@@ -126,8 +126,6 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
             if user_msg.strip().lower() in {"c", "continue", "с"}:
                 # User is ready to proceed to code generation
                 state.phase = "coding_loop"
-                prompt = "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
-                # Continue to coding_loop logic below
             else:
                 # User wants to discuss/modify scenario
                 for chunk in stream_parts(state.chat, user_msg):
@@ -140,16 +138,11 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
 
     # later phases require chat obj
     if not state.chat:
-        append_bot_chunk(history, "⚠️ Internal error: lost chat session.")
-        yield history, state, state.last_video
-        return
+        raise ValueError("Chat not found")
 
     # ── Coding loop ─────────────────────────────────────────────────────────────
     if state.phase == "coding_loop":
         if not user_msg.strip().lower() in {"c", "continue", "с"}:
-            # This should not happen anymore since we handle it in await_task
-            prompt = "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
-        else:
             prompt = "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
 
         while True:  # keep cycling until render succeeds
