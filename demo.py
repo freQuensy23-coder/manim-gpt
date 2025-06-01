@@ -29,7 +29,7 @@ from typing import List, Tuple
 
 import gradio as gr
 from google import genai
-from google.genai.chats import Chat
+from google.genai.chats import Chat, AsyncChat
 from google.genai.types import GenerateContentConfig, ThinkingConfig, UploadFileConfig
 
 from manim_video_generator.video_executor import VideoExecutor  # type: ignore
@@ -66,9 +66,9 @@ class ThinkingStreamPart(StreamPart): pass
 class TextStreamPart(StreamPart): pass
 
 
-def stream_parts(chat: Chat, prompt):
+async def stream_parts(chat, prompt):
     cfg = GenerateContentConfig(thinking_config=ThinkingConfig(include_thoughts=True))
-    for chunk in chat.send_message_stream(prompt, config=cfg):
+    async for chunk in await chat.send_message_stream(prompt, config=cfg):
         if chunk.candidates:
             cand = chunk.candidates[0]
             if cand.content and cand.content.parts:
@@ -90,7 +90,7 @@ def extract_python(md: str) -> str:
 
 class Session(dict):
     phase: str  # await_task | coding_loop | review_loop | finished
-    chat: Chat | None
+    chat: AsyncChat | None
     last_video: Path | None
 
     def __init__(self):
@@ -112,9 +112,9 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
     if state.phase == "await_task":
         if not state.chat:
             # First time - create chat and generate scenario
-            state.chat = client.chats.create(model=MODEL)
+            state.chat = client.aio.chats.create(model=MODEL)
             scenario_prompt = f"{SYSTEM_PROMPT_SCENARIO_GENERATOR}\n\n{user_msg}"
-            for txt in stream_parts(state.chat, scenario_prompt):
+            async for txt in stream_parts(state.chat, scenario_prompt):
                 append_bot_chunk(history, txt.text)
                 yield history, state, state.last_video
                 await asyncio.sleep(0)
@@ -128,7 +128,7 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
                 state.phase = "coding_loop"
             else:
                 # User wants to discuss/modify scenario
-                for chunk in stream_parts(state.chat, user_msg):
+                async for chunk in stream_parts(state.chat, user_msg):
                     append_bot_chunk(history, chunk.text)
                     yield history, state, state.last_video
                     await asyncio.sleep(0)
@@ -142,12 +142,11 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
 
     # ── Coding loop ─────────────────────────────────────────────────────────────
     if state.phase == "coding_loop":
-        if not user_msg.strip().lower() in {"c", "continue", "с"}:
-            prompt = "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
+        prompt = "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
 
         while True:  # keep cycling until render succeeds
             # 1. Ask for code
-            for chunk in stream_parts(state.chat, prompt):
+            async for chunk in stream_parts(state.chat, prompt):
                 append_bot_chunk(history, chunk.text)
                 yield history, state, state.last_video
                 await asyncio.sleep(0)
@@ -198,7 +197,7 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
             # 4. Review
             review_prompt = [file_ref, REVIEW_PROMPT]
             add_user_msg(history, "# system → review video")
-            for chunk in stream_parts(state.chat, review_prompt):
+            async for chunk in stream_parts(state.chat, review_prompt):
                 append_bot_chunk(history, chunk.text)
                 yield history, state, state.last_video
                 await asyncio.sleep(0)
