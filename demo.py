@@ -8,8 +8,8 @@
 • **Ошибки рендера** публикуются *как пользовательское сообщение* и немедленно
   отправляются в Gemini; модель отвечает, мы снова пытаемся сгенерировать код —
   полностью автоматический цикл, как в вашем CLI‑скрипте.  
-• Управление состоянием сведено к чётким этапам: `await_task`, `scenario_edit`,
-  `coding_loop`, `review_loop`, `finished`.
+• Управление состоянием сведено к чётким этапам: `await_task`, `coding_loop`,
+  `review_loop`, `finished`.
 
 Запуск:
 ```bash
@@ -89,7 +89,7 @@ def extract_python(md: str) -> str:
 # ──────────────────────────  Session state  ────────────────────────────────────
 
 class Session(dict):
-    phase: str  # await_task | scenario_edit | coding_loop | review_loop | finished
+    phase: str  # await_task | coding_loop | review_loop | finished
     chat: Chat | None
     last_video: Path | None
 
@@ -110,18 +110,33 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
 
     # bootstrap chat on very first user request
     if state.phase == "await_task":
-        state.chat = client.chats.create(model=MODEL)
-        # ── Scenario generation ────────────────────────────────────────────────
-        scenario_prompt = f"{SYSTEM_PROMPT_SCENARIO_GENERATOR}\n\n{user_msg}"
-        for txt in stream_parts(state.chat, scenario_prompt):
-            append_bot_chunk(history, txt.text)
+        if not state.chat:
+            # First time - create chat and generate scenario
+            state.chat = client.chats.create(model=MODEL)
+            scenario_prompt = f"{SYSTEM_PROMPT_SCENARIO_GENERATOR}\n\n{user_msg}"
+            for txt in stream_parts(state.chat, scenario_prompt):
+                append_bot_chunk(history, txt.text)
+                yield history, state, state.last_video
+                await asyncio.sleep(0)
+            append_bot_chunk(history, "\n\n*(type **continue** to proceed to code generation)*")
             yield history, state, state.last_video
-            await asyncio.sleep(0)
-
-        append_bot_chunk(history, "\n\n*(type **continue** to proceed with this scenario, or provide edits/suggestions to modify it)*")
-        state.phase = "scenario_edit"
-        yield history, state, state.last_video
-        return
+            return
+        else:
+            # Chat exists - check if user wants to proceed or modify scenario
+            if user_msg.strip().lower() in {"c", "continue", "с"}:
+                # User is ready to proceed to code generation
+                state.phase = "coding_loop"
+                prompt = "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
+                # Continue to coding_loop logic below
+            else:
+                # User wants to discuss/modify scenario
+                for chunk in stream_parts(state.chat, user_msg):
+                    append_bot_chunk(history, chunk.text)
+                    yield history, state, state.last_video
+                    await asyncio.sleep(0)
+                append_bot_chunk(history, "\n\n*(type **continue** when ready to proceed to code generation)*")
+                yield history, state, state.last_video
+                return
 
     # later phases require chat obj
     if not state.chat:
@@ -129,39 +144,16 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
         yield history, state, state.last_video
         return
 
-    # ── Scenario editing phase ─────────────────────────────────────────────────
-    if state.phase == "scenario_edit":
-        if user_msg.strip().lower() in {"c", "continue", "с"}:
-            # User is happy with scenario, proceed to code generation
-            state.phase = "coding_loop"
-            append_bot_chunk(history, "✅ Great! Proceeding to code generation...")
-            yield history, state, state.last_video
-            
-            # Start code generation
-            prompt = "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
-            for chunk in stream_parts(state.chat, prompt):
-                append_bot_chunk(history, chunk.text)
-                yield history, state, state.last_video
-                await asyncio.sleep(0)
-            return
-        else:
-            # User wants to modify the scenario
-            edit_prompt = f"Please modify the scenario based on this feedback: {user_msg}"
-            for txt in stream_parts(state.chat, edit_prompt):
-                append_bot_chunk(history, txt.text)
-                yield history, state, state.last_video
-                await asyncio.sleep(0)
-            
-            append_bot_chunk(history, "\n\n*(type **continue** to proceed with this updated scenario, or provide more edits)*")
-            yield history, state, state.last_video
-            return
-
     # ── Coding loop ─────────────────────────────────────────────────────────────
     if state.phase == "coding_loop":
-        # This phase now only handles coding errors and regeneration
-        prompt = user_msg  # User message should be error feedback
+        if not user_msg.strip().lower() in {"c", "continue", "с"}:
+            # This should not happen anymore since we handle it in await_task
+            prompt = "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
+        else:
+            prompt = "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
+
         while True:  # keep cycling until render succeeds
-            # 1. Ask for code (or regenerate based on feedback)
+            # 1. Ask for code
             for chunk in stream_parts(state.chat, prompt):
                 append_bot_chunk(history, chunk.text)
                 yield history, state, state.last_video
