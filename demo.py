@@ -108,6 +108,9 @@ async def coding_cycle(state: "Session", history: List[Tuple[str, str]], prompt)
             continue
 
         try:
+            append_bot_chunk(history, "\n⏳ Rendering... It can take a few minutes")
+            yield history, state, state.last_video
+            await asyncio.sleep(0)
             video_path = video_executor.execute_manim_code(py_code)
             state.last_video = video_path
         except Exception as e:
