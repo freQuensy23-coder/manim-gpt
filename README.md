@@ -19,7 +19,7 @@ Create beautiful explanatory animations from simple text prompts using AI and Ma
 - 🤖 **AI-Powered**: Uses Gemini AI to generate Manim code from natural language
 - 🎥 **Automatic Rendering**: Creates high-quality MP4 videos 
 - 🎵 **Background Music**: Automatically adds background music to all videos
-- 🔄 **Auto-Fix**: AI reviews and fixes rendering errors automatically
+- 🔄 **Auto-Fix**: AI automatically fixes rendering errors and lets you iterate on the result
 - ⚡ **Fast**: Medium quality rendering for quick results
 
 ## How to Use
@@ -29,7 +29,8 @@ Create beautiful explanatory animations from simple text prompts using AI and Ma
 3. The AI will create a scenario and generate Manim code
 4. Type "continue" when prompted to proceed with code generation
 5. Wait for the video to render with background music
-6. Download your animated explanation!
+6. If you want changes, type a new message and the video will be regenerated
+7. Download your animated explanation!
 
 ## Technical Details
 

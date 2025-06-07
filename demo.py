@@ -9,7 +9,9 @@
   отправляются в Gemini; модель отвечает, мы снова пытаемся сгенерировать код —
   полностью автоматический цикл, как в вашем CLI‑скрипте.  
 • Управление состоянием сведено к чётким этапам: `await_task`, `coding_loop`,
-  `review_loop`, `finished`.
+  `await_feedback`, `finished`.
+• После каждого рендера пользователь может дать дополнительные указания —
+  видео отправляется в Gemini и код генерируется заново с учётом замечаний.
 
 Запуск:
 ```bash
@@ -33,7 +35,7 @@ from google.genai.chats import Chat, AsyncChat
 from google.genai.types import GenerateContentConfig, ThinkingConfig, UploadFileConfig
 
 from manim_video_generator.video_executor import VideoExecutor  # type: ignore
-from prompts import SYSTEM_PROMPT_SCENARIO_GENERATOR, SYSTEM_PROMPT_CODEGEN, REVIEW_PROMPT
+from prompts import SYSTEM_PROMPT_SCENARIO_GENERATOR, SYSTEM_PROMPT_CODEGEN
 
 # ────────────────────────────────  Config  ─────────────────────────────────────
 
@@ -86,10 +88,47 @@ def extract_python(md: str) -> str:
         raise ValueError("No ```python``` block found in model output.")
     return m.group(1).strip()
 
+
+async def coding_cycle(state: "Session", history: List[Tuple[str, str]], prompt):
+    """Generate code, render video and return once rendering succeeds."""
+    while True:
+        async for chunk in stream_parts(state.chat, prompt):
+            append_bot_chunk(history, chunk.text)
+            yield history, state, state.last_video
+            await asyncio.sleep(0)
+
+        full_answer = history[-1][1]
+        try:
+            py_code = extract_python(full_answer)
+        except ValueError as e:
+            err_msg = f"Error: {e}. Please wrap the code in ```python``` fence."
+            prompt = err_msg
+            add_user_msg(history, err_msg)
+            yield history, state, state.last_video
+            continue
+
+        try:
+            video_path = video_executor.execute_manim_code(py_code)
+            state.last_video = video_path
+        except Exception as e:
+            tb = traceback.format_exc(limit=10)
+            err_msg = (
+                f"Error, your code is not valid: {e}. Traceback: {tb}. Please fix this error and regenerate the code again."
+            )
+            prompt = err_msg
+            add_user_msg(history, err_msg)
+            yield history, state, state.last_video
+            continue
+
+        append_bot_chunk(history, "\n🎞️ Rendering done! Feel free to request changes or type **finish** to end.")
+        state.phase = "await_feedback"
+        yield history, state, state.last_video
+        return
+
 # ──────────────────────────  Session state  ────────────────────────────────────
 
 class Session(dict):
-    phase: str  # await_task | coding_loop | review_loop | finished
+    phase: str  # await_task | coding_loop | await_feedback | finished
     chat: AsyncChat | None
     last_video: Path | None
 
@@ -143,74 +182,28 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
     # ── Coding loop ─────────────────────────────────────────────────────────────
     if state.phase == "coding_loop":
         prompt = "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
-
-        while True:  # keep cycling until render succeeds
-            # 1. Ask for code
-            async for chunk in stream_parts(state.chat, prompt):
-                append_bot_chunk(history, chunk.text)
-                yield history, state, state.last_video
-                await asyncio.sleep(0)
-
-            full_answer = history[-1][1]
-            try:
-                py_code = extract_python(full_answer)
-            except ValueError as e:
-                # send formatting error to model, loop again
-                err_msg = f"Error: {e}. Please wrap the code in ```python``` fence."
-                prompt = err_msg
-                add_user_msg(history, err_msg)
-                yield history, state, state.last_video
-                continue  # restart loop
-
-            # 2. Render
-            try:
-                video_path = video_executor.execute_manim_code(py_code)
-                state.last_video = video_path
-            except Exception as e:
-                tb = traceback.format_exc(limit=10)
-                err_msg = f"Error, your code is not valid: {e}. Traceback: {tb}. Please fix this error and regenerate the code again."
-                prompt = err_msg
-                add_user_msg(history, err_msg)  # error == user message
-                yield history, state, state.last_video
-                continue  # Gemini will answer with a fix
-
-            append_bot_chunk(history, "\n🎞️ Rendering done, uploading for review…")
+        async for out in coding_cycle(state, history, prompt):
+            yield out
+        return
+    # ── Awaiting user feedback after rendering ────────────────────────────────
+    if state.phase == "await_feedback":
+        if user_msg.strip().lower() in {"finish", "done", "f"}:
+            state.phase = "finished"
+            append_bot_chunk(history, "Session complete. Refresh page to start over.")
             yield history, state, state.last_video
-
-            # 3. Upload
-            try:
-                file_ref = client.files.upload(
-                    file=video_path, config=UploadFileConfig(display_name=video_path.name)
-                )
-                while file_ref.state and file_ref.state.name == "PROCESSING":
-                    await asyncio.sleep(3)
-                    if file_ref.name:
-                        file_ref = client.files.get(name=file_ref.name)
-                if file_ref.state and file_ref.state.name == "FAILED":
-                    raise RuntimeError("Gemini failed to process upload")
-            except Exception as up_err:
-                err_msg = f"Upload error: {up_err}"
-                add_user_msg(history, err_msg)
-                yield history, state, state.last_video
-                continue  # ask Gemini to fix
-
-            # 4. Review
-            review_prompt = [file_ref, REVIEW_PROMPT]
-            add_user_msg(history, "# system → review video")
-            async for chunk in stream_parts(state.chat, review_prompt):
-                append_bot_chunk(history, chunk.text)
-                yield history, state, state.last_video
-                await asyncio.sleep(0)
-
-            if "no issues found" in history[-1][1].lower():
-                append_bot_chunk(history, "\n✅ Video accepted! 🎉")
-                state.phase = "finished"
-                yield history, state, state.last_video
-                return
-            else:
-                append_bot_chunk(history, "\n🔄 Issues found. Trying again…")
-                # let the loop run again (Gemini will generate corrected code)
-                continue
+            return
+        file_ref = client.files.upload(file=state.last_video, config=UploadFileConfig(display_name=state.last_video.name))
+        while file_ref.state and file_ref.state.name == "PROCESSING":
+            await asyncio.sleep(3)
+            if file_ref.name:
+                file_ref = client.files.get(name=file_ref.name)
+        if file_ref.state and file_ref.state.name == "FAILED":
+            raise RuntimeError("Gemini failed to process upload")
+        prompt = [file_ref, f"{user_msg}\n\n{SYSTEM_PROMPT_CODEGEN}"]
+        state.phase = "coding_loop"
+        async for out in coding_cycle(state, history, prompt):
+            yield out
+        return
 
     # ── Finished phase ──────────────────────────────────────────────────────────
     if state.phase == "finished":
