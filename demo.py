@@ -123,7 +123,7 @@ async def coding_cycle(state: "Session", history: List[Tuple[str, str]], prompt)
             yield history, state, state.last_video
             continue
 
-        append_bot_chunk(history, "\n🎞️ Rendering done! Feel free to request changes or type **finish** to end.")
+        append_bot_chunk(history, "\n🎞️ Rendering done! Feel free to request changes or press **Next Step** to end.")
         state.phase = "await_feedback"
         yield history, state, state.last_video
         return
@@ -160,13 +160,13 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
                 append_bot_chunk(history, txt.text)
                 yield history, state, state.last_video
                 await asyncio.sleep(0)
-            append_bot_chunk(history, "\n\n*(type **continue** to proceed to code generation)*")
+            append_bot_chunk(history, "\n\n*(press **Next Step** to proceed to code generation)*")
             yield history, state, state.last_video
             return
         else:
             # Chat exists - check if user wants to proceed or modify scenario
             if user_msg.strip().lower() in {"c", "continue", "с"}:
-                # User is ready to proceed to code generation
+                # Legacy behaviour: typed command to proceed
                 state.phase = "coding_loop"
             else:
                 # User wants to discuss/modify scenario
@@ -174,7 +174,7 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
                     append_bot_chunk(history, chunk.text)
                     yield history, state, state.last_video
                     await asyncio.sleep(0)
-                append_bot_chunk(history, "\n\n*(type **continue** when ready to proceed to code generation)*")
+                append_bot_chunk(history, "\n\n*(press **Next Step** when ready to proceed to code generation)*")
                 yield history, state, state.last_video
                 return
 
@@ -213,6 +213,25 @@ async def chat_handler(user_msg: str, history: List[Tuple[str, str]], state: Ses
         append_bot_chunk(history, "Session complete. Refresh page to start over.")
         yield history, state, state.last_video
 
+async def next_step_handler(history: List[Tuple[str, str]], state: Session):
+    """Advance the conversation without typing control words."""
+    history = history or []
+    if state.phase == "await_task" and state.chat:
+        state.phase = "coding_loop"
+        prompt = "Thanks. It is good scenario. Now generate code for it.\n\n" + SYSTEM_PROMPT_CODEGEN
+        async for out in coding_cycle(state, history, prompt):
+            yield out
+        return
+
+    if state.phase == "await_feedback":
+        state.phase = "finished"
+        append_bot_chunk(history, "Session complete. Refresh page to start over.")
+        yield history, state, state.last_video
+        return
+
+    yield history, state, state.last_video
+
+
 # ───────────────────────────────  UI  ──────────────────────────────────────────
 
 def build_app():
@@ -225,6 +244,7 @@ def build_app():
         with gr.Row():
             txt = gr.Textbox(placeholder="Describe the concept…", scale=4)
             btn = gr.Button("Send", variant="primary")
+            next_btn = gr.Button("Next Step")
 
         vid = gr.Video(label="Rendered video", interactive=False)
 
@@ -233,6 +253,8 @@ def build_app():
 
         btn.click(chat_handler, [txt, history, session], [history, session, vid]) \
            .then(lambda: "", None, txt)
+
+        next_btn.click(next_step_handler, [history, session], [history, session, vid])
 
     return demo
 

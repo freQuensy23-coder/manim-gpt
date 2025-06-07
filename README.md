@@ -26,8 +26,8 @@ Create beautiful explanatory animations from simple text prompts using AI and Ma
 
 1. Describe the concept you want to visualize (e.g. "Explain how neural networks work")
 2. Click "Send" to start the generation process
-3. The AI will create a scenario and generate Manim code
-4. Type "continue" when prompted to proceed with code generation
+3. The AI will create a scenario describing the animation
+4. Press the **Next Step** button when you're ready to generate the Manim code
 5. Wait for the video to render with background music
 6. If you want changes, type a new message and the video will be regenerated
 7. Download your animated explanation!
