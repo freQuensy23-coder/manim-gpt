@@ -15,7 +15,7 @@
 
 Запуск:
 ```bash
-pip install --upgrade gradio google-genai manim_video_generator
+pip install --upgrade gradio google-genai manim_video_generator manim-ml
 export GEMINI_API_KEY="YOUR_KEY"
 python gradio_manim_gemini_app.py
 ```

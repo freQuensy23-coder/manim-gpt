@@ -45,3 +45,9 @@ Set your Gemini API key as an environment variable:
 ```bash
 export GEMINI_API_KEY="your_api_key_here"
 ```
+
+Install dependencies (includes **manim-ml** for ML visualizations):
+```bash
+pip install -r requirements.txt
+```
+You can explore additional examples in [Google's ManimML code samples](https://github.com/google/manim-ml/tree/main/examples).
