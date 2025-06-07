@@ -27,6 +27,8 @@ class GeminiClient:
         
         # Системный промпт с инструкциями
         system_prompt = """You are a Manim code generator. Your ONLY task is to generate executable Python code using the Manim library.
+You can also use the `manim_ml` package (ManimML) for ready-made machine learning scenes and helpers.
+Feel free to reuse examples from Google's official ManimML code samples to illustrate complex ML visuals.
 
 CRITICAL RULES:
 - You MUST respond with ONLY Python code, nothing else
